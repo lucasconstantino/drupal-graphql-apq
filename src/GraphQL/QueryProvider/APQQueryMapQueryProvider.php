@@ -3,9 +3,9 @@
 namespace Drupal\graphql_apq\GraphQL\QueryProvider;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\graphql\GraphQL\QueryProvider\QueryProviderInterface;
 use GraphQL\Server\OperationParams;
 use GraphQL\Server\RequestError;
-use Drupal\graphql\GraphQL\QueryProvider\QueryProviderInterface;
 
 class APQQueryMapQueryProvider implements QueryProviderInterface {
 
@@ -30,58 +30,40 @@ class APQQueryMapQueryProvider implements QueryProviderInterface {
    * {@inheritdoc}
    */
   public function getQuery($id, OperationParams $operation) {
-    $extensions = $operation->getOriginalInput('extensions');
-
     // Early skip if no persistedQuery protocol implemented in operation.
-    if (empty($extensions['persistedQuery'])) {
+    $persistedQuery = $this->persistedQuery($operation);
+    if (!$persistedQuery) {
       return NULL;
-    }
-
-    list($version, $hash) = explode(':', $id);
-
-    // Check that the hash is properly formatted.
-    if (empty($version) || empty($hash)) {
-      return NULL;
-    }
-
-    $storage = $this->entityTypeManager->getStorage('apq_query_map');
-
-    $apqs = $storage->loadByProperties([
-      'version' => $version,
-      'hash' => $hash,
-    ]);
-
-    $apq = empty($apqs) ? NULL : reset($apqs);
-    
-    // Let default handler work in case query is already cached.
-    if (!empty($operation->originalQuery) && !empty($apq)) {
-      return $operation->originalQuery;
     }
 
     // Retrieve query in case we have it cached.
-    if (empty($operation->originalQuery) && !empty($apq)) {
+    $storage = $this->entityTypeManager->getStorage('apq_query_map');
+    $apqs = $storage->loadByProperties([
+      'version' => $persistedQuery['version'],
+      'hash' => $persistedQuery['sha256Hash'],
+    ]);
+    $apq = empty($apqs) ? NULL : reset($apqs);
+    if (!empty($apq)) {
       return $apq->getQuery();
     }
 
-    // Add the query to the cache in case we don't have it yet.
-    if (!empty($operation->originalQuery) && empty($apq)) {
-      $apq = $storage->create([
-        'version' => $version,
-        'query' => $operation->originalQuery,
-        'hash' => $hash,
-      ]);
-
-      $apq->save();
-
-      return $operation->originalQuery;
+    // Send original query if is present.
+    $originalQuery = $operation->getOriginalInput('query');
+    if (empty($apq) && !empty($originalQuery)) {
+      return $originalQuery;
     }
 
-    // In case no query is set after all tries,
-    // respond with PersistedQueryNotFound to allow fulfilling.
+    // In case no query is cached, respond with PersistedQueryNotFound to
+    // allow fulfilling.
     if (empty($operation->originalQuery)) {
       throw new RequestError('PersistedQueryNotFound');
     }
 
     return NULL;
+  }
+
+  private function persistedQuery(OperationParams $operation) {
+    $extensions = $operation->getOriginalInput('extensions');
+    return empty($extensions['persistedQuery']) ? false : $extensions['persistedQuery'];
   }
 }
