@@ -1,7 +1,7 @@
 name: 'Graphql APQ'
 type: module
 description: 'Automatic persisted queries for GraphQL.'
-core: 8.x
+core_version_requirement: ^8.8 || ^9
 package: 'GraphQL'
 dependencies:
   - graphql
